@@ -28,6 +28,9 @@ use crate::utils::{
 
 const MIN_DIST_TO_EDGES: f64 = 20.;
 
+/// Fixed distance between the font and the tab bar
+const GAP_TO_BAR: f64 = 2.;
+
 #[derive(Debug)]
 pub struct TabIndicator {
     shader_locs: Vec<Point<f64, Logical>>,
@@ -117,8 +120,6 @@ impl TabIndicator {
         let progress = self.open_anim.as_ref().map_or(1., |a| a.value().max(0.));
 
         let width = round_max1(self.config.width);
-        let gap = self.config.gap;
-        let gap = round_max1(gap.abs()).copysign(gap);
         let gaps_between = round_max1(self.config.gaps_between_tabs);
 
         let position = self.config.position;
@@ -141,12 +142,12 @@ impl TabIndicator {
             (count - 1) as f64 * (px_per_tab + gaps_between) + px_per_tab * progress;
         let mut ones_left = ((length - floored_length) / pixel).round() as usize;
 
-        let mut shader_loc = Point::from((-width, round((side - length) / 2.)));
+        let mut shader_loc = Point::from((0., round((side - length) / 2.)));
         match position {
             TabIndicatorPosition::Top => mem::swap(&mut shader_loc.x, &mut shader_loc.y),
             TabIndicatorPosition::Bottom => {
                 shader_loc.x = shader_loc.y;
-                shader_loc.y = area.size.h + gap;
+                shader_loc.y = area.size.h - width;
             }
         }
         shader_loc += area.loc;
@@ -300,6 +301,25 @@ impl TabIndicator {
         }
     }
 
+    fn font_height(&self) -> f64 {
+        if !self.config.hide_titles {
+            // we need an initial approximate value here, because when we first spawn the tab
+            // indicator, the textures are not yet rendered, but the tile resize animation plays
+            // immediately.
+            self.title_textures
+                .iter()
+                .fold(self.config.title_font_size as f64, |acc, curr| {
+                    if let Some(texture) = curr.texture.borrow().as_ref() {
+                        texture.logical_size().h.max(acc)
+                    } else {
+                        acc
+                    }
+                })
+        } else {
+            0.
+        }
+    }
+
     pub fn hit(
         &self,
         area: Rectangle<f64, Logical>,
@@ -316,7 +336,24 @@ impl TabIndicator {
             return None;
         }
 
+        let font_height = self.font_height();
+
         self.tab_rects(area, count, scale)
+            .map(|mut rect| {
+                if font_height > 0. {
+                    match self.config.position {
+                        TabIndicatorPosition::Top => {
+                            rect.loc.y -= GAP_TO_BAR;
+                        }
+                        TabIndicatorPosition::Bottom => {
+                            rect.loc.y -= font_height + GAP_TO_BAR + self.config.gap;
+                        }
+                    }
+
+                    rect.size.h += font_height + GAP_TO_BAR + self.config.gap;
+                }
+                rect
+            })
             .enumerate()
             .find_map(|(idx, rect)| rect.contains(point).then_some(idx))
     }
@@ -335,14 +372,12 @@ impl TabIndicator {
             zip(&self.title_textures, &self.shader_locs)
                 .filter_map(|(tex, loc)| match tex.get(renderer.as_gles_renderer()) {
                     Ok(texture) => {
-                        let gap_to_bar = 5.;
-
                         let pos_x = (tex.max_size.w + MIN_DIST_TO_EDGES) / 2.
                             - texture.logical_size().w / 2.;
 
                         let pos_y = match self.config.position {
-                            TabIndicatorPosition::Top => -gap_to_bar,
-                            TabIndicatorPosition::Bottom => gap_to_bar - texture.logical_size().h,
+                            TabIndicatorPosition::Top => -GAP_TO_BAR,
+                            TabIndicatorPosition::Bottom => GAP_TO_BAR - texture.logical_size().h,
                         };
 
                         Some(
@@ -368,12 +403,14 @@ impl TabIndicator {
                 .into_iter()
         });
 
-        let rv = izip!(&self.shaders, &self.title_textures, &self.shader_locs)
-            .map(move |(shader, tex, loc)| {
+        let font_height = self.font_height();
+
+        let rv = zip(&self.shaders, &self.shader_locs)
+            .map(move |(shader, loc)| {
                 let offset = if !self.config.hide_titles {
                     match self.config.position {
-                        TabIndicatorPosition::Top => Point::new(0., tex.size().h),
-                        TabIndicatorPosition::Bottom => Point::new(0., -tex.size().h),
+                        TabIndicatorPosition::Top => Point::new(0., font_height + GAP_TO_BAR),
+                        TabIndicatorPosition::Bottom => Point::new(0., -font_height - GAP_TO_BAR),
                     }
                 } else {
                     Point::default()
@@ -396,22 +433,12 @@ impl TabIndicator {
         let round = |logical: f64| round_logical_in_physical(scale, logical);
         let width = round(self.config.width);
         let gap = round(self.config.gap);
-        let font_height = if !self.config.hide_titles {
-            // we need an initial approximate value here, because when we first spawn the tab
-            // indicator, the textures are not yet rendered, but the tile resize animation plays
-            // immediately.
-            self.title_textures
-                .iter()
-                .fold(self.config.title_font_size as f64, |acc, curr| {
-                    if let Some(texture) = curr.texture.borrow().as_ref() {
-                        texture.logical_size().h.max(acc)
-                    } else {
-                        acc
-                    }
-                })
-        } else {
-            0.
-        };
+        let font_height = self.font_height()
+            + (if !self.config.hide_titles {
+                GAP_TO_BAR
+            } else {
+                0.
+            });
 
         // No, I am *not* falling into the rabbit hole of "what if the tab indicator is wide enough
         // that it peeks from the other side of the window".
@@ -601,14 +628,6 @@ impl TitleTexture {
                 Ok(new_tex)
             }
         }
-    }
-
-    fn size(&self) -> Size<f64, Logical> {
-        self.texture
-            .borrow()
-            .as_ref()
-            .map(|tex| tex.logical_size())
-            .unwrap_or_default()
     }
 }
 

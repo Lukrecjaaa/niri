@@ -1170,7 +1170,24 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn focus_window(&mut self, id: &W::Id) -> bool {
-        self.window.focus_window(id)
+        if self.focused_window().id() == id {
+            return true;
+        }
+
+        let current_size = self.focused_window().size();
+        let current_mode = self.focused_window().sizing_mode();
+
+        if self.window.focus_window(id) {
+            self.window_size_override.set(current_size);
+
+            let new_window = self.focused_window_mut();
+
+            new_window.request_size(current_size, current_mode, false, None);
+
+            true
+        } else {
+            false
+        }
     }
 
     pub fn windows(&self) -> impl Iterator<Item = &W> {
@@ -1403,22 +1420,44 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     fn is_in_activation_region(&self, point: Point<f64, Logical>) -> bool {
-        let activation_region = Rectangle::from_size(self.tile_size());
+        let activation_region = Rectangle::from_size(self.tile_bounding_box());
         activation_region.contains(point)
     }
 
-    pub fn hit(&self, point: Point<f64, Logical>) -> Option<HitType> {
+    pub fn hit(&self, point: Point<f64, Logical>) -> Option<(Option<&W>, HitType)> {
         let offset = self.bob_offset();
         let point = point - offset;
 
         if self.is_in_input_region(point) {
             let win_pos = self.buf_loc() + offset;
-            Some(HitType::Input { win_pos })
+            Some((Some(self.focused_window()), HitType::Input { win_pos }))
         } else if self.is_in_activation_region(point) {
-            // TODO: tab indicator activation logic
-            Some(HitType::Activate {
-                is_tab_indicator: false,
-            })
+            if let WindowInner::Multiple {
+                windows,
+                focus_idx: _,
+            } = &self.window
+            {
+                if let Some(hit_idx) = self.tab_indicator.hit(
+                    Rectangle::from_size(self.tile_bounding_box()),
+                    windows.len(),
+                    self.scale,
+                    point,
+                ) {
+                    return Some((
+                        windows.get(hit_idx),
+                        HitType::Activate {
+                            is_tab_indicator: true,
+                        },
+                    ));
+                }
+            }
+
+            Some((
+                None,
+                HitType::Activate {
+                    is_tab_indicator: false,
+                },
+            ))
         } else {
             None
         }

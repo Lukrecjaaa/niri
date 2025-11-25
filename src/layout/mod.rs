@@ -591,8 +591,12 @@ impl HitType {
         point: Point<f64, Logical>,
     ) -> Option<(&W, Self)> {
         let pos_within_tile = point - tile_pos;
-        tile.hit(pos_within_tile)
-            .map(|hit| (tile.focused_window(), hit.offset_win_pos(tile_pos)))
+        tile.hit(pos_within_tile).map(|(window, hit)| {
+            (
+                window.unwrap_or_else(|| tile.focused_window()),
+                hit.offset_win_pos(tile_pos),
+            )
+        })
     }
 
     pub fn to_activate(self) -> Self {
