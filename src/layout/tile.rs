@@ -428,7 +428,8 @@ niri_render_elements! {
         Border = BorderRenderElement,
         Shadow = ShadowRenderElement,
         Blur = BlurRenderElement,
-        ClippedSurface = ClippedSurfaceRenderElement<WaylandSurfaceRenderElement<R>, R>,
+        BlurClippedSurface = ClippedSurfaceRenderElement<BlurRenderElement>,
+        ClippedSurface = ClippedSurfaceRenderElement<WaylandSurfaceRenderElement<R>>,
         Offscreen = OffscreenRenderElement,
         ExtraDamage = ExtraDamage,
         TabIndicator = TabIndicatorRenderElement,
@@ -1766,6 +1767,10 @@ impl<W: LayoutElement> Tile<W> {
         let mut window_popups = None;
         let mut rounded_corner_damage = None;
         let has_border_shader = BorderRenderElement::has_shader(renderer);
+        let geo = Rectangle::new(window_render_loc, window_size);
+        let clip_shader = clip_to_geometry
+            .then(|| Shaders::get(renderer).clipped_surface.clone())
+            .flatten();
         if resize_shader.is_none() && resize_fallback.is_none() {
             let window = self.window.focused_window().render(
                 renderer,
@@ -1775,15 +1780,14 @@ impl<W: LayoutElement> Tile<W> {
                 target,
             );
 
-            let geo = Rectangle::new(window_render_loc, window_size);
             let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
-
-            let clip_shader = Shaders::get(renderer).clipped_surface.clone();
 
             if clip_to_geometry && clip_shader.is_some() {
                 let damage = self.rounded_corner_damage.element();
                 rounded_corner_damage = Some(damage.with_location(window_render_loc).into());
             }
+
+            let clip_shader = clip_shader.clone();
 
             window_surface = Some(window.normal.into_iter().map(move |elem| match elem {
                 LayoutElementRenderElement::Wayland(elem) => {
@@ -1801,6 +1805,8 @@ impl<W: LayoutElement> Tile<W> {
                                     geo,
                                     shader.clone(),
                                     radius,
+                                    None,
+                                    0.,
                                 )
                                 .into();
                             }
@@ -1928,19 +1934,40 @@ impl<W: LayoutElement> Tile<W> {
                 let fx_buffers = fx_buffers?;
                 let fx_buffers = fx_buffers.borrow();
 
-                Some(
-                    BlurRenderElement::new_optimized(
-                        renderer,
-                        &fx_buffers,
-                        blur_sample_area.to_i32_round(),
-                        window_render_loc.to_physical(self.scale).to_i32_round(),
-                        radius.top_left,
-                        self.scale,
-                        self.blur_config,
+                let elem = BlurRenderElement::new_optimized(
+                    renderer,
+                    &fx_buffers,
+                    blur_sample_area.to_i32_round(),
+                    window_render_loc.to_physical(self.scale).to_i32_round(),
+                    radius.top_left,
+                    self.scale,
+                    self.blur_config,
+                );
+
+                let elem = if clip_to_geometry {
+                    let view_src = blur_sample_area;
+                    let buf_size = fx_buffers
+                        .output_size()
+                        .to_f64()
+                        .to_logical(self.scale)
+                        .to_i32_round();
+                    ClippedSurfaceRenderElement::new(
+                        elem,
+                        view_src,
+                        buf_size,
+                        scale,
+                        geo,
+                        clip_shader?.clone(),
+                        radius,
                         None,
+                        0.,
                     )
-                    .into(),
-                )
+                    .into()
+                } else {
+                    elem.into()
+                };
+
+                Some(elem)
             })
             .flatten()
             .into_iter();

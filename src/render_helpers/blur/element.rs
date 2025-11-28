@@ -4,9 +4,7 @@ use niri_config::Blur;
 
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
-use smithay::backend::renderer::gles::{
-    ffi, GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform,
-};
+use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::backend::renderer::Renderer;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
@@ -34,7 +32,6 @@ pub enum BlurRenderElement {
         output_size: Size<i32, Physical>,
         config: Blur,
         output_transform: Transform,
-        alpha_tex: Option<GlesTexture>,
     },
     /// Use true blur.
     ///
@@ -76,7 +73,6 @@ impl BlurRenderElement {
         corner_radius: f32,
         scale: f64,
         config: Blur,
-        alpha_tex: Option<GlesTexture>,
     ) -> Self {
         let texture = fx_buffers.optimized_blur.clone();
 
@@ -109,7 +105,6 @@ impl BlurRenderElement {
             scale,
             output_size: fx_buffers.output_size,
             output_transform: fx_buffers.transform,
-            alpha_tex,
             config,
         }
     }
@@ -342,16 +337,7 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
         let _span = trace_span!("blur_draw_gles").entered();
 
         match self {
-            Self::Optimized {
-                tex,
-                corner_radius,
-                noise,
-                scale,
-                output_size,
-                output_transform,
-                config,
-                alpha_tex,
-            } => {
+            Self::Optimized { tex, scale, .. } => {
                 let downscaled_dst = Rectangle::new(
                     dst.loc,
                     Size::from((
@@ -360,66 +346,14 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                     )),
                 );
 
-                let program = Shaders::get_from_frame(gles_frame).blur_finish.clone();
-                let gles_frame: &mut GlesFrame = gles_frame;
-                let geo = output_transform.transform_rect_in(dst, output_size);
-                gles_frame.override_default_tex_program(
-                    program.unwrap(),
-                    vec![
-                        Uniform::new(
-                            "geo",
-                            [
-                                geo.loc.x as f32,
-                                geo.loc.y as f32,
-                                geo.size.w as f32,
-                                geo.size.h as f32,
-                            ],
-                        ),
-                        Uniform::new("corner_radius", *corner_radius),
-                        Uniform::new("output_size", [output_size.w as f32, output_size.h as f32]),
-                        Uniform::new("noise", *noise),
-                        Uniform::new("alpha", self.alpha()),
-                        Uniform::new(
-                            "ignore_alpha",
-                            if alpha_tex.is_some() {
-                                config.ignore_alpha.0 as f32
-                            } else {
-                                0.
-                            },
-                        ),
-                        Uniform::new("alpha_tex", 1),
-                    ],
-                );
-
-                if let Some(alpha_tex) = alpha_tex {
-                    gles_frame.with_context(|gl| unsafe {
-                        gl.ActiveTexture(ffi::TEXTURE1);
-                        gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
-                        gl.TexParameteri(
-                            ffi::TEXTURE_2D,
-                            ffi::TEXTURE_MIN_FILTER,
-                            ffi::LINEAR as i32,
-                        );
-                        gl.TexParameteri(
-                            ffi::TEXTURE_2D,
-                            ffi::TEXTURE_MAG_FILTER,
-                            ffi::LINEAR as i32,
-                        );
-                    })?;
-                }
-
-                let res = <TextureRenderElement<GlesTexture> as RenderElement<GlesRenderer>>::draw(
+                <TextureRenderElement<GlesTexture> as RenderElement<GlesRenderer>>::draw(
                     &tex.0,
                     gles_frame,
                     src,
                     downscaled_dst,
                     damage,
                     opaque_regions,
-                );
-
-                gles_frame.clear_tex_program_override();
-
-                res
+                )
             }
             Self::TrueBlur {
                 fx_buffers,

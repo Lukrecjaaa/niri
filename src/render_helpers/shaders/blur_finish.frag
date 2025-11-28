@@ -28,29 +28,8 @@ varying vec2 v_coords;
 
 uniform vec4 geo;
 uniform vec2 output_size;
-uniform float corner_radius;
 uniform float noise;
 uniform float ignore_alpha;
-
-float rounding_alpha(vec2 coords, vec2 size, float radius) {
-    vec2 center;
-
-    if (coords.x < radius && coords.y < radius) {
-        center = vec2(radius, radius);
-    } else if (coords.x > size.x - radius && coords.y < radius) {
-        center = vec2(size.x - radius, radius);
-    } else if (coords.x > size.x - radius && coords.y > size.y - radius) {
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < radius && coords.y > size.y - radius) {
-        center = vec2(radius, size.y - radius);
-    } else {
-        return 1.0;
-    }
-
-    float dist = distance(coords, center);
-    float half_px = 0.5 ;
-    return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
-}
 
 // Noise function copied from hyprland.
 // I like the effect it gave, can be tweaked further
@@ -79,19 +58,10 @@ void main() {
     color = vec4(color.rgb, 1.0);
 #endif
 
-    // This shader exists to make blur rounding correct.
-    // 
-    // Since we are scr-ing a texture that is the size of the output, the v_coords are always
-    // relative to the output. This corresponds to gl_FragCoord.
-    vec2 size = geo.zw;
-    // NOTE: this is incorrect when rendering in winit, since y is inverted,
-    // but on tty produces the correct result, which is all that matters
-    vec2 loc = gl_FragCoord.xy - geo.xy;
-
     if (noise > 0.0) {
       // Add noise fx
       // This can be used to achieve a glass look
-      float noiseHash   = hash(loc / size);
+      float noiseHash   = hash(v_coords);
       float noiseAmount = (mod(noiseHash, 1.0) - 0.5);
       color.rgb += noiseAmount * noise;
     }
@@ -100,11 +70,6 @@ void main() {
 
     if (color.a <= 0.0) {
       discard;
-    }
-
-    // Apply corner rounding inside geometry.
-    if (corner_radius > 0.0) {
-      color *= rounding_alpha(loc, size, corner_radius);
     }
 
     gl_FragColor = color;

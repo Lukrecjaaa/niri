@@ -1,31 +1,28 @@
-use std::marker::PhantomData;
-
 use glam::{Mat3, Vec2};
 use niri_config::CornerRadius;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{
-    GlesError, GlesFrame, GlesRenderer, GlesTexProgram, Uniform,
+    ffi, GlesError, GlesFrame, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
 };
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use super::damage::ExtraDamage;
-use super::renderer::{AsGlesFrame as _, NiriRenderer};
+use super::renderer::AsGlesFrame as _;
 use super::shaders::mat3_uniform;
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
 
 #[derive(Debug)]
-pub struct ClippedSurfaceRenderElement<E, R>
+pub struct ClippedSurfaceRenderElement<E>
 where
-    E: RenderElement<R>,
-    R: NiriRenderer,
+    E: Element,
 {
     inner: E,
     program: GlesTexProgram,
     corner_radius: CornerRadius,
     geometry: Rectangle<f64, Logical>,
     uniforms: Vec<Uniform<'static>>,
-    marker: PhantomData<R>,
+    alpha_tex: Option<GlesTexture>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -34,11 +31,11 @@ pub struct RoundedCornerDamage {
     corner_radius: CornerRadius,
 }
 
-impl<E, R> ClippedSurfaceRenderElement<E, R>
+impl<E> ClippedSurfaceRenderElement<E>
 where
-    E: RenderElement<R>,
-    R: NiriRenderer,
+    E: Element,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         elem: E,
         view_src: Rectangle<f64, Logical>,
@@ -47,6 +44,8 @@ where
         geometry: Rectangle<f64, Logical>,
         program: GlesTexProgram,
         corner_radius: CornerRadius,
+        alpha_tex: Option<GlesTexture>,
+        ignore_alpha: f64,
     ) -> Self {
         let elem_geo = elem.geometry(scale);
 
@@ -80,12 +79,17 @@ where
             * Mat3::from_scale(buf_size / src_size)
             * Mat3::from_translation(-src_loc / buf_size);
 
-        let uniforms = vec![
+        let mut uniforms = vec![
             Uniform::new("niri_scale", scale.x as f32),
             Uniform::new("geo_size", (geometry.size.w as f32, geometry.size.h as f32)),
             Uniform::new("corner_radius", <[f32; 4]>::from(corner_radius)),
             mat3_uniform("input_to_geo", input_to_geo),
         ];
+
+        if alpha_tex.is_some() && ignore_alpha > 0. {
+            uniforms.push(Uniform::new("alpha_tex", 1));
+            uniforms.push(Uniform::new("ignore_alpha", ignore_alpha as f32));
+        }
 
         Self {
             inner: elem,
@@ -93,7 +97,7 @@ where
             corner_radius,
             geometry,
             uniforms,
-            marker: PhantomData,
+            alpha_tex,
         }
     }
 
@@ -148,10 +152,9 @@ where
     }
 }
 
-impl<E, R> Element for ClippedSurfaceRenderElement<E, R>
+impl<E> Element for ClippedSurfaceRenderElement<E>
 where
-    E: RenderElement<R>,
-    R: NiriRenderer,
+    E: Element,
 {
     fn id(&self) -> &Id {
         self.inner.id()
@@ -226,7 +229,7 @@ where
     }
 }
 
-impl<E> RenderElement<GlesRenderer> for ClippedSurfaceRenderElement<E, GlesRenderer>
+impl<E> RenderElement<GlesRenderer> for ClippedSurfaceRenderElement<E>
 where
     E: RenderElement<GlesRenderer>,
 {
@@ -239,6 +242,16 @@ where
         opaque_regions: &[Rectangle<i32, Physical>],
     ) -> Result<(), GlesError> {
         frame.override_default_tex_program(self.program.clone(), self.uniforms.clone());
+
+        if let Some(alpha_tex) = &self.alpha_tex {
+            frame.with_context(|gl| unsafe {
+                gl.ActiveTexture(ffi::TEXTURE1);
+                gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
+                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+            })?;
+        }
+
         RenderElement::<GlesRenderer>::draw(&self.inner, frame, src, dst, damage, opaque_regions)?;
         frame.clear_tex_program_override();
         Ok(())
@@ -251,8 +264,7 @@ where
     }
 }
 
-impl<'render, E> RenderElement<TtyRenderer<'render>>
-    for ClippedSurfaceRenderElement<E, TtyRenderer<'render>>
+impl<'render, E> RenderElement<TtyRenderer<'render>> for ClippedSurfaceRenderElement<E>
 where
     E: RenderElement<TtyRenderer<'render>>,
 {
@@ -267,6 +279,16 @@ where
         frame
             .as_gles_frame()
             .override_default_tex_program(self.program.clone(), self.uniforms.clone());
+
+        if let Some(alpha_tex) = &self.alpha_tex {
+            frame.as_gles_frame().with_context(|gl| unsafe {
+                gl.ActiveTexture(ffi::TEXTURE1);
+                gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
+                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+            })?;
+        }
+
         RenderElement::draw(&self.inner, frame, src, dst, damage, opaque_regions)?;
         frame.as_gles_frame().clear_tex_program_override();
         Ok(())

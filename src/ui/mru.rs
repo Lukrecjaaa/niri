@@ -112,7 +112,7 @@ pub enum MruCloseRequest {
 niri_render_elements! {
     ThumbnailRenderElement<R> => {
         LayoutElement = LayoutElementRenderElement<R>,
-        ClippedSurface = ClippedSurfaceRenderElement<WaylandSurfaceRenderElement<R>, R>,
+        ClippedSurface = ClippedSurfaceRenderElement<WaylandSurfaceRenderElement<R>>,
         Border = BorderRenderElement,
     }
 }
@@ -401,6 +401,8 @@ impl Thumbnail {
                             geo,
                             shader.clone(),
                             radius,
+                            None,
+                            0.,
                         );
                         return ThumbnailRenderElement::ClippedSurface(elem);
                     }

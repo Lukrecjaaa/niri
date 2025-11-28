@@ -16,7 +16,9 @@ use crate::layout::shadow::Shadow;
 use crate::niri_render_elements;
 use crate::render_helpers::blur::element::BlurRenderElement;
 use crate::render_helpers::blur::EffectsFramebufffersUserData;
+use crate::render_helpers::clipped_surface::ClippedSurfaceRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
+use crate::render_helpers::shaders::Shaders;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::{render_to_texture, RenderTarget, SplitElements};
@@ -59,6 +61,7 @@ niri_render_elements! {
         SolidColor = SolidColorRenderElement,
         Shadow = ShadowRenderElement,
         Blur = BlurRenderElement,
+        ClippedBlur = ClippedSurfaceRenderElement<BlurRenderElement>,
     }
 }
 
@@ -195,6 +198,7 @@ impl MappedLayer {
         let location = location + self.bob_offset();
 
         let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
+        let ignore_alpha = self.rules.blur.ignore_alpha.unwrap_or_default().0;
 
         if target.should_block_out(self.rules.block_out_from) {
             // Round to physical pixels.
@@ -236,14 +240,16 @@ impl MappedLayer {
                 Kind::ScanoutCandidate,
             );
 
-            gles_elems = Some(render_elements_from_surface_tree(
-                renderer.as_gles_renderer(),
-                surface,
-                buf_pos.to_physical_precise_round(scale),
-                scale,
-                alpha,
-                Kind::ScanoutCandidate,
-            ));
+            gles_elems = (ignore_alpha > 0.).then(|| {
+                render_elements_from_surface_tree(
+                    renderer.as_gles_renderer(),
+                    surface,
+                    buf_pos.to_physical_precise_round(scale),
+                    scale,
+                    alpha,
+                    Kind::ScanoutCandidate,
+                )
+            });
         };
 
         let blur_elem = (self.blur_config.on
@@ -253,39 +259,77 @@ impl MappedLayer {
             let fx_buffers = fx_buffers.borrow();
 
             // TODO: respect sync point?
-            let alpha_tex = gles_elems
-                .and_then(|gles_elems| {
-                    let transform = fx_buffers.transform();
+            let alpha_tex = (ignore_alpha > 0.)
+                .then(|| {
+                    gles_elems.and_then(|gles_elems| {
+                        let transform = fx_buffers.transform();
 
-                    render_to_texture(
-                        renderer.as_gles_renderer(),
-                        transform.transform_size(fx_buffers.output_size()),
-                        self.scale.into(),
-                        Transform::Normal,
-                        Fourcc::Abgr8888,
-                        gles_elems.into_iter(),
-                    )
-                    .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
-                    .ok()
+                        render_to_texture(
+                            renderer.as_gles_renderer(),
+                            transform.transform_size(fx_buffers.output_size()),
+                            self.scale.into(),
+                            Transform::Normal,
+                            Fourcc::Abgr8888,
+                            gles_elems.into_iter(),
+                        )
+                        .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                        .ok()
+                    })
                 })
+                .flatten()
                 .map(|r| r.0);
 
-            Some(
-                BlurRenderElement::new_optimized(
-                    renderer,
-                    &fx_buffers,
-                    Rectangle::new(location, self.size).to_i32_round(),
-                    location.to_physical_precise_round(self.scale),
-                    self.rules
-                        .geometry_corner_radius
-                        .unwrap_or_default()
-                        .top_left,
-                    self.scale,
-                    self.blur_config,
+            let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+
+            let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
+
+            let elem = BlurRenderElement::new_optimized(
+                renderer,
+                &fx_buffers,
+                blur_sample_area,
+                location.to_physical_precise_round(self.scale),
+                self.rules
+                    .geometry_corner_radius
+                    .unwrap_or_default()
+                    .top_left,
+                self.scale,
+                self.blur_config,
+            );
+
+            let geo = Rectangle::new(location, blur_sample_area.size.to_f64());
+
+            let clip_to_geometry =
+                ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radius);
+
+            let clip_shader = (alpha_tex.is_some() || clip_to_geometry)
+                .then(|| Shaders::get(renderer).clipped_surface.clone())
+                .flatten();
+
+            let elem = if let Some(clip_shader) = clip_shader {
+                let view_src = blur_sample_area.to_f64();
+                let buf_size = fx_buffers
+                    .output_size()
+                    .to_f64()
+                    .to_logical(self.scale)
+                    .to_i32_round();
+
+                ClippedSurfaceRenderElement::new(
+                    elem,
+                    view_src,
+                    buf_size,
+                    self.scale.into(),
+                    geo,
+                    clip_shader,
+                    radius,
                     alpha_tex,
+                    ignore_alpha,
                 )
-                .into(),
-            )
+                .into()
+            } else {
+                elem.into()
+            };
+
+            Some(elem)
         })
         .flatten()
         .into_iter();
