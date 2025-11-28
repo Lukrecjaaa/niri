@@ -17,19 +17,10 @@ uniform samplerExternalOES tex;
 uniform sampler2D tex;
 #endif
 
-#if defined(EXTERNAL)
-uniform samplerExternalOES alpha_tex;
-#else
-uniform sampler2D alpha_tex;
-#endif
-
 uniform float alpha;
 varying vec2 v_coords;
 
-uniform vec4 geo;
-uniform vec2 output_size;
 uniform float noise;
-uniform float ignore_alpha;
 
 // Noise function copied from hyprland.
 // I like the effect it gave, can be tweaked further
