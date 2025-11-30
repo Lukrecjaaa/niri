@@ -4,7 +4,7 @@
   <img height="600px" src="assets/screenshots/groups-blur.png" />
 </p>
 
-This repo houses a fork of [niri](https://github/com/YaLTeR/niri), a scrollable tiling Wayland compositor.
+This repo houses a fork of [niri](https://github.com/YaLTeR/niri), a scrollable tiling Wayland compositor.
 
 This fork changes the behavior of upstream niri in a few ways that do not necessarily align with upstream's vision for
 the project (hence the fork).
