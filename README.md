@@ -90,8 +90,9 @@ layer-rule {
 
 - True blur currently only works for horizontal monitor configurations. When using any sort of 90 or 270 degree
   transformations, only x-ray blur will be available.
-- True blur is rather performance intensive as of right now, since it renders itself on every frame. It is recommended
-  to only enable it for surfaces that don't take up a lot of screen time (e.g. notifications, dialogs).
+- True blur is rather performance intensive as of right now, since it re-renders itself on a fixed timer as opposed to
+  reacting to screen damage. It is recommended to only enable it for surfaces that don't take up a lot of screen time
+  (e.g. notifications, dialogs).
 - Blur is currently only possible to be enabled through the config. Implementing both
   [KDE blur](https://wayland.app/protocols/kde-blur) and
   [background effect](https://wayland.app/protocols/ext-background-effect-v1) is planned though.

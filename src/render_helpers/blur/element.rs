@@ -204,7 +204,9 @@ impl Blur {
                 texture.size().w != fx_buffers.output_size().w
                     || texture.size().h != fx_buffers.output_size().h
             }
-            _ => true,
+            BlurVariant::True { rerender_at, .. } => {
+                rerender_at.borrow().is_none_or(|r| r < Instant::now())
+            }
         };
 
         let variant_needs_reconfigure = match &inner.variant {
@@ -223,8 +225,6 @@ impl Blur {
             && !variant_needs_reconfigure
         {
             if variant_needs_rerender {
-                // If we are true blur, or if our output size changed, we need to always be
-                // damaged. True blur has a separate internal timer to regulate frame rate.
                 inner.damage_all();
             }
 
