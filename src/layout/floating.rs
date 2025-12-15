@@ -8,7 +8,7 @@ use niri_ipc::{PositionChange, SizeChange, WindowLayout};
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Serial, Size};
 
-use super::closing_window::{ClosingWindow, ClosingWindowRenderElement};
+use super::closing_element::{ClosingElement, ClosingElementRenderElement};
 use super::scrolling::ColumnWidth;
 use super::tile::{Tile, TileRenderElement, TileRenderSnapshot};
 use super::workspace::{InteractiveResize, ResolvedSize};
@@ -51,7 +51,7 @@ pub struct FloatingSpace<W: LayoutElement> {
     interactive_resize: Option<InteractiveResize<W>>,
 
     /// Windows in the closing animation.
-    closing_windows: Vec<ClosingWindow>,
+    closing_windows: Vec<ClosingElement>,
 
     /// View size for this space.
     view_size: Size<f64, Logical>,
@@ -72,7 +72,7 @@ pub struct FloatingSpace<W: LayoutElement> {
 niri_render_elements! {
     FloatingSpaceRenderElement<R> => {
         Tile = TileRenderElement<R>,
-        ClosingWindow = ClosingWindowRenderElement,
+        ClosingWindow = ClosingElementRenderElement,
     }
 }
 
@@ -686,8 +686,8 @@ impl<W: LayoutElement> FloatingSpace<W> {
         };
 
         let scale = Scale::from(self.scale);
-        let res = ClosingWindow::new(
-            renderer, snapshot, scale, tile_size, tile_pos, blocker, anim,
+        let res = ClosingElement::new(
+            renderer, snapshot, scale, tile_size, tile_pos, blocker, anim, true,
         );
         match res {
             Ok(closing) => {

@@ -10,7 +10,7 @@ use ordered_float::NotNan;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Serial, Size};
 
-use super::closing_window::{ClosingWindow, ClosingWindowRenderElement};
+use super::closing_element::{ClosingElement, ClosingElementRenderElement};
 use super::monitor::InsertPosition;
 use super::tile::{Tile, TileRenderElement, TileRenderSnapshot};
 use super::workspace::{InteractiveResize, ResolvedSize};
@@ -67,7 +67,7 @@ pub struct ScrollingSpace<W: LayoutElement> {
     view_offset_to_restore: Option<f64>,
 
     /// Windows in the closing animation.
-    closing_windows: Vec<ClosingWindow>,
+    closing_windows: Vec<ClosingElement>,
 
     /// View size for this space.
     view_size: Size<f64, Logical>,
@@ -96,7 +96,7 @@ pub struct ScrollingSpace<W: LayoutElement> {
 niri_render_elements! {
     ScrollingSpaceRenderElement<R> => {
         Tile = TileRenderElement<R>,
-        ClosingWindow = ClosingWindowRenderElement,
+        ClosingWindow = ClosingElementRenderElement,
     }
 }
 
@@ -1488,8 +1488,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         };
 
         let scale = Scale::from(self.scale);
-        let res = ClosingWindow::new(
-            renderer, snapshot, scale, tile_size, tile_pos, blocker, anim,
+        let res = ClosingElement::new(
+            renderer, snapshot, scale, tile_size, tile_pos, blocker, anim, true,
         );
         match res {
             Ok(closing) => {

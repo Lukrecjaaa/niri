@@ -114,7 +114,7 @@ use smithay::wayland::xdg_foreign::XdgForeignState;
 
 #[cfg(feature = "dbus")]
 use crate::a11y::A11y;
-use crate::animation::Clock;
+use crate::animation::{Animation, Clock};
 use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
@@ -140,6 +140,7 @@ use crate::input::{
 use crate::ipc::server::IpcServer;
 use crate::layer::MappedLayer;
 use crate::layer::mapped::LayerSurfaceRenderElement;
+use crate::layout::closing_element::{ClosingElement, ClosingElementRenderElement};
 use crate::layout::tile::TileRenderElement;
 use crate::layout::workspace::{Workspace, WorkspaceId};
 use crate::layout::{HitType, Layout, LayoutElement as _, MonitorRenderElement};
@@ -174,6 +175,7 @@ use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
 use crate::utils::spawning::{CHILD_DISPLAY, CHILD_ENV};
+use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::vblank_throttle::VBlankThrottle;
 use crate::utils::watcher::Watcher;
 use crate::utils::xwayland::satellite::Satellite;
@@ -244,6 +246,9 @@ pub struct Niri {
 
     /// Extra data for mapped layer surfaces.
     pub mapped_layer_surfaces: HashMap<LayerSurface, MappedLayer>,
+
+    /// Closing layer animations
+    pub closing_layers: Vec<ClosingElement>,
 
     // Cached root surface for every surface, so that we can access it in destroyed() where the
     // normal get_parent() is cleared out.
@@ -2703,6 +2708,7 @@ impl Niri {
             unmapped_windows: HashMap::new(),
             unmapped_layer_surfaces: HashSet::new(),
             mapped_layer_surfaces: HashMap::new(),
+            closing_layers: Vec::new(),
             root_surface: HashMap::new(),
             dmabuf_pre_commit_hook: HashMap::new(),
             blocker_cleared_tx,
@@ -4254,6 +4260,8 @@ impl Niri {
         self.screenshot_ui.advance_animations();
         self.window_mru_ui.advance_animations();
 
+        self.advance_layer_animations();
+
         for state in self.output_state.values_mut() {
             if let Some(transition) = &mut state.screen_transition
                 && transition.is_done()
@@ -4261,6 +4269,11 @@ impl Niri {
                 state.screen_transition = None;
             }
         }
+
+        self.closing_layers.retain_mut(|closing| {
+            closing.advance_animations();
+            closing.are_animations_ongoing()
+        });
     }
 
     pub fn update_render_elements(&mut self, output: Option<&Output>) {
@@ -4284,7 +4297,7 @@ impl Niri {
                         continue;
                     };
 
-                    mapped.update_render_elements(geo.size.to_f64());
+                    mapped.update_render_elements(geo.to_f64());
                 }
             }
         }
@@ -4435,6 +4448,27 @@ impl Niri {
             .layout
             .render_interactive_move_for_output(renderer, output, target)
             .collect();
+
+        // Render closing layers
+        elements.extend(self.closing_layers.iter().filter_map(|layer| {
+            let mode = output.current_mode()?;
+
+            Some(
+                layer
+                    .render(
+                        renderer.as_gles_renderer(),
+                        Rectangle::new(
+                            output.current_location().to_f64(),
+                            mode.size
+                                .to_f64()
+                                .to_logical(output.current_scale().fractional_scale()),
+                        ),
+                        output.current_scale().fractional_scale().into(),
+                        RenderTarget::Output,
+                    )
+                    .into(),
+            )
+        }));
 
         // Get layer-shell elements.
         let layer_map = layer_map_for_output(output);
@@ -4594,18 +4628,73 @@ impl Niri {
         fx_buffers: Option<EffectsFramebuffersUserData>,
     ) {
         // LayerMap returns layers in reverse stacking order.
-        let iter = layer_map.layers_on(layer).rev().filter_map(|surface| {
-            let mapped = self.mapped_layer_surfaces.get(surface)?;
+        layer_map
+            .layers_on(layer)
+            .rev()
+            .filter_map(|surface| {
+                let mapped = self.mapped_layer_surfaces.get(surface)?;
 
-            if for_backdrop != mapped.place_within_backdrop() {
-                return None;
-            }
+                if for_backdrop != mapped.place_within_backdrop() {
+                    return None;
+                }
 
-            let geo = layer_map.layer_geometry(surface)?;
-            Some((mapped, geo))
-        });
-        for (mapped, geo) in iter {
-            elements.extend(mapped.render(renderer, geo.loc.to_f64(), target, fx_buffers.clone()));
+                let geo = layer_map.layer_geometry(surface)?;
+                Some(mapped.render(renderer, geo.loc.to_f64(), target, fx_buffers.clone()))
+            })
+            .for_each(|l| elements.extend(l));
+    }
+
+    fn advance_layer_animations(&mut self) {
+        self.mapped_layer_surfaces
+            .values_mut()
+            .for_each(MappedLayer::advance_animations);
+    }
+
+    pub fn start_close_animation_for_layer(
+        &mut self,
+        mut layer: MappedLayer,
+        renderer: &mut GlesRenderer,
+        output: &Output,
+    ) {
+        let Some(snapshot) = layer.take_unmap_snapshot() else {
+            return;
+        };
+
+        let config = self.config.borrow();
+
+        let anim = Animation::new(
+            self.clock.clone(),
+            0.,
+            1.,
+            0.,
+            config.animations.window_open.anim,
+        );
+
+        let transaction = Transaction::new();
+
+        let blocker = if config.debug.disable_transactions {
+            TransactionBlocker::completed()
+        } else {
+            transaction.blocker()
+        };
+
+        let scale = output.current_scale().fractional_scale();
+
+        let geo = layer.geometry();
+
+        if let Ok(anim) = ClosingElement::new(
+            renderer,
+            snapshot,
+            scale.into(),
+            geo.size,
+            geo.loc,
+            blocker,
+            anim,
+            false,
+        )
+        .inspect_err(|e| warn!("error creating a closing layer animation: {e:?}"))
+        {
+            self.closing_layers.push(anim);
         }
     }
 
@@ -4636,6 +4725,10 @@ impl Niri {
             state.unfinished_animations_remain |= self.screenshot_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= self.window_mru_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= state.screen_transition.is_some();
+            state.unfinished_animations_remain |= self
+                .closing_layers
+                .iter()
+                .any(|closing| closing.are_animations_ongoing());
 
             // Also keep redrawing if the current cursor is animated.
             state.unfinished_animations_remain |= self
@@ -6704,6 +6797,7 @@ niri_render_elements! {
         Monitor = MonitorRenderElement<R>,
         RescaledTile = RescaleRenderElement<TileRenderElement<R>>,
         LayerSurface = LayerSurfaceRenderElement<R>,
+        ClosingElement = ClosingElementRenderElement,
         RelocatedLayerSurface = CropRenderElement<RelocateRenderElement<RescaleRenderElement<
             LayerSurfaceRenderElement<R>
         >>>,

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use niri_config::utils::MergeWith as _;
 use niri_config::{Config, LayerRule};
 use smithay::backend::allocator::Fourcc;
@@ -11,17 +13,24 @@ use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
 
 use super::ResolvedLayerRules;
-use crate::animation::Clock;
+use crate::animation::{Animation, Clock};
 use crate::layout::shadow::Shadow;
 use crate::niri_render_elements;
 use crate::render_helpers::blur::EffectsFramebuffersUserData;
 use crate::render_helpers::blur::element::{Blur, BlurRenderElement, CommitTracker};
 use crate::render_helpers::clipped_surface::ClippedSurfaceRenderElement;
+use crate::render_helpers::offscreen::{OffscreenBuffer, OffscreenRenderElement};
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
+use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::{RenderTarget, SplitElements, render_to_texture};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
+
+type LayerRenderSnapshot = RenderSnapshot<
+    LayerSurfaceRenderElement<GlesRenderer>,
+    LayerSurfaceRenderElement<GlesRenderer>,
+>;
 
 #[derive(Debug)]
 pub struct MappedLayer {
@@ -40,9 +49,8 @@ pub struct MappedLayer {
     /// Configuration for this layer's blur.
     blur: Blur,
 
-    /// Size (used for blur).
-    // TODO: move to standalone blur struct
-    size: Size<f64, Logical>,
+    /// Geometry of this layer.
+    geo: Rectangle<f64, Logical>,
 
     /// The view size for the layer surface's output.
     view_size: Size<f64, Logical>,
@@ -52,6 +60,24 @@ pub struct MappedLayer {
 
     /// Clock for driving animations.
     clock: Clock,
+
+    /// Snapshot for fade-out layer animation.
+    unmap_snapshot: RefCell<Option<LayerRenderSnapshot>>,
+
+    /// Commit tracker for when to update the unmap snapshot.
+    unmap_tracker: RefCell<CommitTracker>,
+
+    /// The alpha animation for this layer surface.
+    alpha_animation: Option<AlphaAnimation>,
+
+    /// Configuration for the alpha animation.
+    alpha_cfg: niri_config::Animation,
+}
+
+#[derive(Debug)]
+struct AlphaAnimation {
+    anim: Animation,
+    offscreen: OffscreenBuffer,
 }
 
 niri_render_elements! {
@@ -61,6 +87,7 @@ niri_render_elements! {
         Shadow = ShadowRenderElement,
         Blur = BlurRenderElement,
         ClippedBlur = ClippedSurfaceRenderElement<BlurRenderElement>,
+        Offscreen = OffscreenRenderElement,
     }
 }
 
@@ -91,7 +118,19 @@ impl MappedLayer {
             shadow: Shadow::new(shadow_config),
             clock,
             blur: Blur::new(blur_config),
-            size: Size::default(),
+            geo: Rectangle::default(),
+            unmap_snapshot: RefCell::new(None),
+            unmap_tracker: RefCell::new(CommitTracker::default()),
+            alpha_animation: None,
+            alpha_cfg: config.animations.window_open.anim,
+        }
+    }
+
+    pub fn advance_animations(&mut self) {
+        if let Some(alpha) = &mut self.alpha_animation
+            && alpha.anim.is_done()
+        {
+            self.alpha_animation = None;
         }
     }
 
@@ -117,13 +156,14 @@ impl MappedLayer {
         self.scale = scale;
     }
 
-    pub fn update_render_elements(&mut self, size: Size<f64, Logical>) {
+    pub fn update_render_elements(&mut self, geo: Rectangle<f64, Logical>) {
         // Round to physical pixels.
-        let size = size
+        let size = geo
+            .size
             .to_physical_precise_round(self.scale)
             .to_logical(self.scale);
 
-        self.size = size;
+        self.geo = geo;
 
         self.block_out_buffer.resize(size);
 
@@ -136,7 +176,7 @@ impl MappedLayer {
     }
 
     pub const fn are_animations_ongoing(&self) -> bool {
-        self.rules.baba_is_float
+        self.rules.baba_is_float || self.alpha_animation.is_some()
     }
 
     pub const fn surface(&self) -> &LayerSurface {
@@ -185,10 +225,54 @@ impl MappedLayer {
         Point::from((0., y))
     }
 
+    pub fn start_fade_in_animation(&mut self) {
+        self.alpha_animation = Some(AlphaAnimation {
+            anim: Animation::new(self.clock.clone(), 0., 1., 0., self.alpha_cfg),
+            offscreen: OffscreenBuffer::default(),
+        })
+    }
+
     pub fn render<R: NiriRenderer>(
         &self,
         renderer: &mut R,
         location: Point<f64, Logical>,
+        target: RenderTarget,
+        fx_buffers: Option<EffectsFramebuffersUserData>,
+    ) -> SplitElements<LayerSurfaceRenderElement<R>> {
+        if let Some(alpha) = &self.alpha_animation {
+            let renderer = renderer.as_gles_renderer();
+            let elements =
+                self.render_inner(renderer, Point::default(), location, target, fx_buffers);
+
+            alpha
+                .offscreen
+                .render(renderer, self.scale.into(), &elements.normal)
+                .inspect_err(|e| {
+                    warn!("failed to render layer to offscreen for alpha animation: {e:?}")
+                })
+                .map(|(elem, _sync, _data)| {
+                    let offset = elem.offset();
+
+                    SplitElements {
+                        normal: vec![
+                            elem.with_alpha(alpha.anim.clamped_value() as f32)
+                                .with_offset(location + offset)
+                                .into(),
+                        ],
+                        popups: vec![],
+                    }
+                })
+                .unwrap_or_default()
+        } else {
+            self.render_inner(renderer, location, location, target, fx_buffers)
+        }
+    }
+
+    fn render_inner<R: NiriRenderer>(
+        &self,
+        renderer: &mut R,
+        location: Point<f64, Logical>,
+        real_location: Point<f64, Logical>,
         target: RenderTarget,
         fx_buffers: Option<EffectsFramebuffersUserData>,
     ) -> SplitElements<LayerSurfaceRenderElement<R>> {
@@ -203,6 +287,12 @@ impl MappedLayer {
         let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
         let ignore_alpha = self.rules.blur.ignore_alpha.unwrap_or_default().0;
         let mut update_alpha_tex = ignore_alpha > 0.;
+
+        // We only want to update the layer texture snapshot if we are in the main render pass.
+        // Currently, we can verify this by checking the presence of `fx_buffers`, since they are
+        // only passed for rendering blur, which is currently only rendered on output and output
+        // screencasts.
+        let should_try_update_snapshot = fx_buffers.is_some();
 
         if target.should_block_out(self.rules.block_out_from) {
             // Round to physical pixels.
@@ -297,7 +387,7 @@ impl MappedLayer {
                 }
             }
 
-            let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
+            let blur_sample_area = Rectangle::new(real_location, self.geo.size).to_i32_round();
 
             let geo = Rectangle::new(location, blur_sample_area.size.to_f64());
 
@@ -325,14 +415,84 @@ impl MappedLayer {
         rv.normal
             .extend(self.shadow.render(renderer, location).map(Into::into));
 
+        {
+            let mut tracker = self.unmap_tracker.borrow_mut();
+            let elem_tracker = CommitTracker::from_elements(rv.normal.iter());
+
+            if should_try_update_snapshot && *tracker != elem_tracker {
+                *tracker = elem_tracker;
+                drop(tracker);
+
+                self.try_update_unmap_snapshot(renderer.as_gles_renderer(), real_location);
+            }
+        }
+
         rv.normal.extend(blur_elem);
 
         rv
     }
 
+    pub fn geometry(&self) -> Rectangle<f64, Logical> {
+        self.geo
+    }
+
     pub const fn set_blurred(&mut self, new_blurred: bool) {
         if !self.rules.blur.off {
             self.rules.blur.on = new_blurred;
+        }
+    }
+
+    fn try_update_unmap_snapshot(
+        &self,
+        renderer: &mut GlesRenderer,
+        location: Point<f64, Logical>,
+    ) {
+        if let Some(snapshot) = self.render_snapshot(renderer, location) {
+            let mut cell = self.unmap_snapshot.borrow_mut();
+            *cell = Some(snapshot);
+        }
+    }
+
+    pub fn take_unmap_snapshot(&mut self) -> Option<LayerRenderSnapshot> {
+        self.unmap_snapshot.take()
+    }
+
+    fn render_snapshot(
+        &self,
+        renderer: &mut GlesRenderer,
+        location: Point<f64, Logical>,
+    ) -> Option<LayerRenderSnapshot> {
+        let _span = tracy_client::span!("MappedLayer::render_snapshot");
+
+        let contents = self.render_inner(
+            renderer,
+            Point::default(),
+            location,
+            RenderTarget::Output,
+            None,
+        );
+
+        let blocked_out_contents = self.render(
+            renderer,
+            Point::from((0., 0.)),
+            RenderTarget::Screencast,
+            None,
+        );
+
+        // Right before layer destruction, some shells may commit without any render elements, in
+        // which case we do _not_ want to update our snapshot, since that would prevent us from
+        // rendering a fade-out animation.
+        if contents.normal.is_empty() || blocked_out_contents.normal.is_empty() {
+            None
+        } else {
+            Some(RenderSnapshot {
+                contents: contents.normal,
+                blocked_out_contents: blocked_out_contents.normal,
+                block_out_from: self.rules().block_out_from,
+                size: self.geo.size,
+                texture: Default::default(),
+                blocked_out_texture: Default::default(),
+            })
         }
     }
 }

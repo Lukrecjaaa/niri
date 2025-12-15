@@ -55,7 +55,7 @@ impl WlrLayerShellHandler for State {
         let wl_surface = surface.wl_surface();
         self.niri.unmapped_layer_surfaces.remove(wl_surface);
 
-        let output = match self.niri.layout.outputs().find_map(|o| {
+        let (output, removed_layer) = match self.niri.layout.outputs().find_map(|o| {
             let map = layer_map_for_output(o);
             let layer = map
                 .layers()
@@ -69,12 +69,21 @@ impl WlrLayerShellHandler for State {
                 }
 
                 map.unmap_layer(&layer);
-                self.niri.mapped_layer_surfaces.remove(&layer);
-                Some(output)
+                let removed_layer = self.niri.mapped_layer_surfaces.remove(&layer);
+
+                (Some(output), removed_layer)
             }
-            _ => None,
+            None => (None, None),
         };
+
         if let Some(output) = output {
+            if let Some(removed_layer) = removed_layer {
+                self.backend.with_primary_renderer(|renderer| {
+                    self.niri
+                        .start_close_animation_for_layer(removed_layer, renderer, &output);
+                });
+            }
+
             self.niri.output_resized(&output);
         }
     }
@@ -139,7 +148,7 @@ impl State {
                 let output_size = output_size(&output);
                 let scale = output.current_scale().fractional_scale();
 
-                let mapped = MappedLayer::new(
+                let mut mapped = MappedLayer::new(
                     layer.clone(),
                     rules,
                     output_size,
@@ -147,6 +156,8 @@ impl State {
                     self.niri.clock.clone(),
                     &config,
                 );
+
+                mapped.start_fade_in_animation();
 
                 let prev = self
                     .niri

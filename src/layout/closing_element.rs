@@ -24,17 +24,17 @@ use crate::render_helpers::{RenderTarget, render_to_encompassing_texture};
 use crate::utils::transaction::TransactionBlocker;
 
 #[derive(Debug)]
-pub struct ClosingWindow {
-    /// Contents of the window.
+pub struct ClosingElement {
+    /// Contents of the element.
     buffer: TextureBuffer<GlesTexture>,
 
-    /// Blocked-out contents of the window.
+    /// Blocked-out contents of the element.
     blocked_out_buffer: TextureBuffer<GlesTexture>,
 
-    /// Where the window should be blocked out from.
+    /// Where the element should be blocked out from.
     block_out_from: Option<BlockOutFrom>,
 
-    /// Size of the window geometry.
+    /// Size of the element geometry.
     geo_size: Size<f64, Logical>,
 
     /// Position in the workspace.
@@ -51,10 +51,13 @@ pub struct ClosingWindow {
 
     /// Random seed for the shader.
     random_seed: f32,
+
+    /// Whether to animate the window / layer size, or just alpha.
+    animate_size: bool,
 }
 
 niri_render_elements! {
-    ClosingWindowRenderElement => {
+    ClosingElementRenderElement => {
         Texture = RelocateRenderElement<RescaleRenderElement<PrimaryGpuTextureRenderElement>>,
         Shader = ShaderRenderElement,
     }
@@ -83,7 +86,8 @@ impl AnimationState {
     }
 }
 
-impl ClosingWindow {
+impl ClosingElement {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<E: RenderElement<GlesRenderer>>(
         renderer: &mut GlesRenderer,
         snapshot: RenderSnapshot<E, E>,
@@ -92,8 +96,9 @@ impl ClosingWindow {
         pos: Point<f64, Logical>,
         blocker: TransactionBlocker,
         anim: Animation,
+        animate_size: bool,
     ) -> anyhow::Result<Self> {
-        let _span = tracy_client::span!("ClosingWindow::new");
+        let _span = tracy_client::span!("ClosingElement::new");
 
         let mut render_to_texture = |elements: Vec<E>| -> anyhow::Result<_> {
             let (texture, _sync_point, geo) = render_to_encompassing_texture(
@@ -134,6 +139,7 @@ impl ClosingWindow {
             blocked_out_buffer_offset,
             anim_state: AnimationState::new(blocker, anim),
             random_seed: fastrand::f32(),
+            animate_size,
         })
     }
 
@@ -162,7 +168,7 @@ impl ClosingWindow {
         view_rect: Rectangle<f64, Logical>,
         scale: Scale<f64>,
         target: RenderTarget,
-    ) -> ClosingWindowRenderElement {
+    ) -> ClosingElementRenderElement {
         let (buffer, offset) = if target.should_block_out(self.block_out_from) {
             (&self.blocked_out_buffer, self.blocked_out_buffer_offset)
         } else {
@@ -259,7 +265,11 @@ impl ClosingWindow {
         let elem = RescaleRenderElement::from_element(
             elem,
             (center - offset).to_physical_precise_round(scale),
-            ((1. - clamped_progress) / 5. + 0.8).max(0.),
+            if self.animate_size {
+                ((1. - clamped_progress) / 5. + 0.8).max(0.)
+            } else {
+                1.
+            },
         );
 
         let mut location = self.pos + offset;

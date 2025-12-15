@@ -31,6 +31,18 @@
 //! workspace just like any other. Then they come back, reconnect the second monitor, and now we
 //! don't want an unassuming workspace to end up on it.
 
+pub mod closing_element;
+pub mod floating;
+pub mod focus_ring;
+pub mod insert_hint_element;
+pub mod monitor;
+pub mod opening_window;
+pub mod scrolling;
+pub mod shadow;
+pub mod tab_indicator;
+pub mod tile;
+pub mod workspace;
+
 use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
@@ -74,18 +86,6 @@ use crate::utils::{
     round_logical_in_physical_max1,
 };
 use crate::window::ResolvedWindowRules;
-
-pub mod closing_window;
-pub mod floating;
-pub mod focus_ring;
-pub mod insert_hint_element;
-pub mod monitor;
-pub mod opening_window;
-pub mod scrolling;
-pub mod shadow;
-pub mod tab_indicator;
-pub mod tile;
-pub mod workspace;
 
 #[cfg(test)]
 mod tests;
