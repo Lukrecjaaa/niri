@@ -1057,9 +1057,8 @@ impl<W: LayoutElement> Layout<W> {
 
                 let scrolling_width = ws.resolve_scrolling_width(&window, width);
 
-                let tile = ws.make_tile(window);
-                ws.add_tile(
-                    tile,
+                ws.add_window(
+                    window,
                     target,
                     activate,
                     scrolling_width,

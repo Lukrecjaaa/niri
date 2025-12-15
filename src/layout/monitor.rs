@@ -508,6 +508,34 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    fn post_add_window(
+        &mut self,
+        mut workspace_idx: usize,
+        activate: ActivateWindow,
+        allow_to_activate_workspace: bool,
+    ) {
+        let workspace = &mut self.workspaces[workspace_idx];
+
+        // After adding a new window, workspace becomes this output's own.
+        if workspace.name().is_none() {
+            workspace.original_output = OutputId::new(&self.output);
+        }
+
+        if workspace_idx == self.workspaces.len() - 1 {
+            // Insert a new empty workspace.
+            self.add_workspace_bottom();
+        }
+
+        if self.options.layout.empty_workspace_above_first && workspace_idx == 0 {
+            self.add_workspace_top();
+            workspace_idx += 1;
+        }
+
+        if allow_to_activate_workspace && activate.map_smart(|| false) {
+            self.activate_workspace(workspace_idx);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn add_window(
         &mut self,
@@ -519,20 +547,21 @@ impl<W: LayoutElement> Monitor<W> {
         is_floating: bool,
         cursor_pos: Option<Point<f64, Logical>>,
     ) {
-        // Currently, everything a workspace sets on a Tile is the same across all workspaces of a
-        // monitor. So we can use any workspace, not necessarily the exact target workspace.
-        let tile = self.workspaces[0].make_tile(window);
+        let (workspace_idx, target) = self.resolve_add_window_target(target);
 
-        self.add_tile(
-            tile,
+        let workspace = &mut self.workspaces[workspace_idx];
+
+        workspace.add_window(
+            window,
             target,
             activate,
-            true,
             width,
             is_full_width,
             is_floating,
             cursor_pos,
         );
+
+        self.post_add_window(workspace_idx, activate, true);
     }
 
     pub fn add_column(&mut self, mut workspace_idx: usize, column: Column<W>, activate: bool) {
@@ -571,7 +600,7 @@ impl<W: LayoutElement> Monitor<W> {
         is_floating: bool,
         cursor_pos: Option<Point<f64, Logical>>,
     ) {
-        let (mut workspace_idx, target) = self.resolve_add_window_target(target);
+        let (workspace_idx, target) = self.resolve_add_window_target(target);
 
         let workspace = &mut self.workspaces[workspace_idx];
 
@@ -585,24 +614,7 @@ impl<W: LayoutElement> Monitor<W> {
             cursor_pos,
         );
 
-        // After adding a new window, workspace becomes this output's own.
-        if workspace.name().is_none() {
-            workspace.original_output = OutputId::new(&self.output);
-        }
-
-        if workspace_idx == self.workspaces.len() - 1 {
-            // Insert a new empty workspace.
-            self.add_workspace_bottom();
-        }
-
-        if self.options.layout.empty_workspace_above_first && workspace_idx == 0 {
-            self.add_workspace_top();
-            workspace_idx += 1;
-        }
-
-        if allow_to_activate_workspace && activate.map_smart(|| false) {
-            self.activate_workspace(workspace_idx);
-        }
+        self.post_add_window(workspace_idx, activate, allow_to_activate_workspace);
     }
 
     pub fn add_tile_to_column(

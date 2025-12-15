@@ -599,6 +599,49 @@ impl<W: LayoutElement> Workspace<W> {
         self.view_size
     }
 
+    /// Add a window to this workspace.
+    ///
+    /// If the currently active tile is a grouped tile, will add the window to that grouped tile,
+    /// otherwise will create a new tile and add it to this workspace.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_window(
+        &mut self,
+        window: W,
+        target: WorkspaceAddWindowTarget<W>,
+        activate: ActivateWindow,
+        width: ColumnWidth,
+        is_full_width: bool,
+        is_floating: bool,
+        cursor_pos: Option<Point<f64, Logical>>,
+    ) {
+        let active_tile = if self.floating_is_active()
+            && let Some(active_window) = self.floating.active_window().map(|w| w.id().clone())
+        {
+            self.floating
+                .tiles_mut()
+                .find(|t| *t.focused_window().id() == active_window)
+        } else {
+            self.scrolling.active_tile_mut()
+        };
+
+        if let Some(active_tile) = active_tile
+            && active_tile.is_grouped_tile()
+        {
+            active_tile.add_window(window);
+        } else {
+            let new_tile = self.make_tile(window);
+            self.add_tile(
+                new_tile,
+                target,
+                activate,
+                width,
+                is_full_width,
+                is_floating,
+                cursor_pos,
+            );
+        }
+    }
+
     pub fn make_tile(&self, window: W) -> Tile<W> {
         Tile::new(
             window,
@@ -609,6 +652,10 @@ impl<W: LayoutElement> Workspace<W> {
         )
     }
 
+    /// Add a new tile to this workspace.
+    ///
+    /// When adding a (new) window, prefer using [`Workspace::add_window`] instead, as this will dynamically
+    /// add a window to either the currently active grouped tile, or create a new tile on demand.
     #[allow(clippy::too_many_arguments)]
     pub fn add_tile(
         &mut self,
