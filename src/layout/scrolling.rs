@@ -2089,18 +2089,33 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         self.options.clone(),
                     );
 
-                    let final_target_tile_idx = target_tile_idx
-                        + if direction == WindowMoveDirection::Up {
-                            1
-                        } else {
-                            0
-                        };
+                    let final_target_tile_idx = if matches!(
+                        direction,
+                        WindowMoveDirection::Left | WindowMoveDirection::Right
+                    ) {
+                        0
+                    } else {
+                        target_tile_idx
+                            + if direction == WindowMoveDirection::Up {
+                                1
+                            } else {
+                                0
+                            }
+                    };
 
-                    self.add_tile_to_column(
-                        target_col_idx,
-                        Some(final_target_tile_idx),
+                    if direction == WindowMoveDirection::Left {
+                        target_col_idx += 1;
+                    }
+
+                    let width = ColumnWidth::Fixed(new_tile.focused_window().size().w as f64);
+
+                    self.add_tile(
+                        Some(target_col_idx),
                         new_tile,
                         true,
+                        width,
+                        false,
+                        Some(self.options.animations.window_movement.0),
                     );
 
                     let target_position = self
