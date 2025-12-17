@@ -626,6 +626,7 @@ impl<W: LayoutElement> Workspace<W> {
 
         if let Some(active_tile) = active_tile
             && active_tile.is_grouped_tile()
+            && !is_floating
         {
             active_tile.add_window(window);
         } else {
