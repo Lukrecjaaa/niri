@@ -9,6 +9,8 @@ pub struct Animations {
     pub off: bool,
     pub slowdown: f64,
     pub workspace_switch: WorkspaceSwitchAnim,
+    pub layer_open: LayerOpenAnim,
+    pub layer_close: LayerCloseAnim,
     pub window_open: WindowOpenAnim,
     pub window_close: WindowCloseAnim,
     pub horizontal_view_movement: HorizontalViewMovementAnim,
@@ -26,6 +28,8 @@ impl Default for Animations {
         Self {
             off: false,
             slowdown: 1.,
+            layer_open: Default::default(),
+            layer_close: Default::default(),
             workspace_switch: Default::default(),
             horizontal_view_movement: Default::default(),
             window_movement: Default::default(),
@@ -148,6 +152,44 @@ impl Default for WorkspaceSwitchAnim {
                 epsilon: 0.0001,
             }),
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerOpenAnim {
+    pub anim: Animation,
+}
+
+impl Default for LayerOpenAnim {
+    fn default() -> Self {
+        Self {
+            anim: Animation {
+                off: false,
+                kind: Kind::Easing(EasingParams {
+                    duration_ms: 180,
+                    curve: Curve::EaseOutExpo,
+                }),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerCloseAnim {
+    pub anim: Animation,
+}
+
+impl Default for LayerCloseAnim {
+    fn default() -> Self {
+        Self {
+            anim: Animation {
+                off: false,
+                kind: Kind::Easing(EasingParams {
+                    duration_ms: 180,
+                    curve: Curve::EaseOutQuad,
+                }),
+            },
+        }
     }
 }
 

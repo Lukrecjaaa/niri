@@ -114,7 +114,7 @@ impl MappedLayer {
             unmap_snapshot: RefCell::new(None),
             unmap_tracker: RefCell::new(CommitTracker::default()),
             alpha_animation: None,
-            alpha_cfg: config.animations.window_open.anim,
+            alpha_cfg: config.animations.layer_open.anim,
         }
     }
 
@@ -308,7 +308,10 @@ impl MappedLayer {
                     surface,
                     buf_pos.to_physical_precise_round(scale),
                     scale,
-                    alpha,
+                    // Elements for the alpha texture are always rendered at "final" opacity, so
+                    // the blur doesn't just "pop into existence" at some point during the fade in
+                    // animation.
+                    self.rules.opacity.unwrap_or(1.),
                     Kind::ScanoutCandidate,
                 ));
             } else {
@@ -383,7 +386,9 @@ impl MappedLayer {
             let elem_tracker = CommitTracker::from_elements(rv.normal.iter());
 
             if should_try_update_snapshot
-                && (*tracker != elem_tracker || self.unmap_snapshot.borrow().is_none())
+                && (*tracker != elem_tracker
+                    || self.unmap_snapshot.borrow().is_none()
+                    || self.are_animations_ongoing())
             {
                 *tracker = elem_tracker;
                 drop(tracker);

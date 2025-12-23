@@ -4667,7 +4667,7 @@ impl Niri {
             0.,
             1.,
             0.,
-            config.animations.window_open.anim,
+            config.animations.layer_close.anim,
         );
 
         let transaction = Transaction::new();

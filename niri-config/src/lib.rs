@@ -1461,6 +1461,28 @@ mod tests {
                         ),
                     },
                 ),
+                layer_open: LayerOpenAnim {
+                    anim: Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 180,
+                                curve: EaseOutExpo,
+                            },
+                        ),
+                    },
+                },
+                layer_close: LayerCloseAnim {
+                    anim: Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 180,
+                                curve: EaseOutQuad,
+                            },
+                        ),
+                    },
+                },
                 window_open: WindowOpenAnim {
                     anim: Animation {
                         off: true,
