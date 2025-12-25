@@ -235,13 +235,6 @@ impl CompositorHandler for State {
                     if let Some(output) = output {
                         self.niri.layout.start_open_animation_for_window(&window);
 
-                        let new_focus = self.niri.layout.focus().map(|m| &m.window);
-                        if new_focus == Some(&window) && !self.niri.layout.is_focus_floating() {
-                            // We activated the newly opened window.
-                            self.maybe_warp_cursor_to_focus();
-                            self.niri.layer_shell_on_demand_focus = None;
-                        }
-
                         self.niri.queue_redraw(&output);
                     }
                     return;
