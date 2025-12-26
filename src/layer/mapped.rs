@@ -366,7 +366,7 @@ impl MappedLayer {
                         self.scale,
                         geo,
                         !self.rules.blur.x_ray.unwrap_or_default(),
-                        blur_sample_area.loc.to_f64(),
+                        blur_sample_area.loc.to_f64().upscale(self.scale),
                         None,
                         alpha,
                     )
