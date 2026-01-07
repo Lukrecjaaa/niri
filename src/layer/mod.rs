@@ -39,6 +39,7 @@ impl ResolvedLayerRules {
             blur: BlurRule {
                 off: false,
                 on: false,
+                draw_interval: None,
                 passes: None,
                 radius: None,
                 noise: None,

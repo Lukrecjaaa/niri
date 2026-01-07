@@ -1288,6 +1288,9 @@ mod tests {
                     ignore_alpha: FloatOrInt(
                         0.0,
                     ),
+                    draw_interval: FloatOrInt(
+                        150.0,
+                    ),
                     x_ray: false,
                 },
                 shadow: Shadow {
@@ -1799,6 +1802,7 @@ mod tests {
                         contrast: None,
                         saturation: None,
                         ignore_alpha: None,
+                        draw_interval: None,
                         x_ray: None,
                     },
                     shadow: ShadowRule {
@@ -1887,6 +1891,7 @@ mod tests {
                         contrast: None,
                         saturation: None,
                         ignore_alpha: None,
+                        draw_interval: None,
                         x_ray: None,
                     },
                     geometry_corner_radius: None,

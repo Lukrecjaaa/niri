@@ -348,6 +348,7 @@ pub struct Blur {
     pub contrast: FloatOrInt<0, 1024>,
     pub saturation: FloatOrInt<0, 1024>,
     pub ignore_alpha: FloatOrInt<0, 1>,
+    pub draw_interval: FloatOrInt<1, 1000>,
     pub x_ray: bool,
 }
 
@@ -362,6 +363,7 @@ impl Default for Blur {
             contrast: FloatOrInt(1.0),
             saturation: FloatOrInt(1.0),
             ignore_alpha: FloatOrInt(0.0),
+            draw_interval: FloatOrInt(150.),
             x_ray: false,
         }
     }
@@ -383,7 +385,8 @@ impl MergeWith<BlurRule> for Blur {
             contrast,
             saturation,
             ignore_alpha,
-            x_ray
+            x_ray,
+            draw_interval
         );
     }
 }
@@ -716,6 +719,8 @@ pub struct BlurRule {
     pub saturation: Option<FloatOrInt<0, 1024>>,
     #[knuffel(child, unwrap(argument))]
     pub ignore_alpha: Option<FloatOrInt<0, 1>>,
+    #[knuffel(child, unwrap(argument))]
+    pub draw_interval: Option<FloatOrInt<1, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub x_ray: Option<bool>,
 }

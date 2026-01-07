@@ -29,7 +29,6 @@ use super::render_elements;
 use super::shaders::Shaders;
 
 use std::sync::MutexGuard;
-use std::time::{Duration, Instant};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum CurrentBuffer {
@@ -78,10 +77,6 @@ pub struct EffectsFramebuffers {
 }
 
 pub type EffectsFramebuffersUserData = Rc<RefCell<EffectsFramebuffers>>;
-
-fn get_rerender_at() -> Option<Instant> {
-    Some(Instant::now() + Duration::from_millis(150))
-}
 
 impl EffectsFramebuffers {
     /// Get the associated [`EffectsFramebuffers`] with this output.

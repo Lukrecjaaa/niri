@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use glam::{Mat3, Vec2};
 use niri_config::CornerRadius;
@@ -19,7 +19,7 @@ use smithay::reexports::gbm::Format;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::blur::{EffectsFramebuffersUserData, get_rerender_at};
+use crate::render_helpers::blur::EffectsFramebuffersUserData;
 use crate::render_helpers::render_data::RendererData;
 use crate::render_helpers::renderer::AsGlesFrame;
 use crate::render_helpers::shaders::{Shaders, mat3_uniform};
@@ -549,7 +549,10 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                         )
                     })??;
 
-                    rerender_at.set(get_rerender_at());
+                    rerender_at.set(Some(
+                        Instant::now()
+                            + Duration::from_millis(config.draw_interval.0.round() as u64),
+                    ));
                 };
 
                 gles_frame.render_texture_from_to(

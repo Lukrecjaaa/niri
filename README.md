@@ -23,9 +23,9 @@ Windows (both floating and tiling), as well as layer surfaces can have blur enab
 for each window / layer surface explicitly.
 
 Tiled windows will always draw "optimized" or "x-ray" blur, which is rendered from a shared texture using only the
-`bottom` and `background` layer surfaces, and is updated at a slower rate. Floating windows, as well as `top` or
-`overlay` layer surfaces will draw "true" blur by default instead, which is rendered using all available screen
-contents.
+`bottom` and `background` layer surfaces, and is only updated when one of the layer surfaces changes. Floating windows,
+as well as `top` or `overlay` layer surfaces will draw "true" blur by default instead, which is rendered using all
+available screen contents and updates at a fixed frame rate.
 
 Note that true blur is rather expensive in terms of GPU load however (even though its frame rate is limited as long as
 the window isn't being resized / the layer surface doesn't update), so an option exists to also have these surfaces draw
@@ -83,6 +83,11 @@ layer-rule {
     // will render "x-ray" blur that is only based on `bottom` and `background` layer surfaces,
     // even if the window is floating. good for minimal GPU load.
     x-ray true
+
+    // how often true blur should be redrawn (interval in ms) - has no effect on x-ray blur;
+    // this can also be adjusted on a per-window/layer basis, to have certain blurred surfaces update more
+    // frequently, and others less so
+    draw-interval 150
   }
 }
 ```
@@ -91,34 +96,11 @@ layer-rule {
 >
 > Blur has to be enabled on a per-window or per-layer basis, i.e. setting `layout { blur { on } }` does nothing.
 
-This fork also partially implements the [KDE blur](https://wayland.app/protocols/kde-blur) protocol as well as the
+This fork also implements the [KDE blur](https://wayland.app/protocols/kde-blur) protocol as well as the
 [background effect](https://wayland.app/protocols/ext-background-effect-v1) protocol, meaning that certain apps such as
 KDE apps (e.g. plasmashell or krunner), or other compliant apps, are capable of blurring themselves natively, given that
 you've defined nonzero `radius` and `passes` for blur elsewhere in your config. This doesn't require you to set
 `blur { on }` in your window / layer rules, but having `blur { off }` will disable this behavior entirely.
-
-However, this fork lacks the ability to more granularly define blur region, which will likely result in oversized blur.
-To mitigate this, it is recommended to set `ignore-alpha` in your config. Below you'll find a config for sensible blur
-defaults:
-
-```kdl
-layout {
-  blur {
-    // removes banding and gives it a "glassy" look
-    noise 0.04
-    passes 4
-    radius 12
-  }
-}
-
-layer-rule {
-  blur {
-    ignore-alpha 0.8
-    // use optimized blur for layer surfaces by default, to reduce GPU load
-    x-ray true
-  }
-}
-```
 
 > [!NOTE]
 >
@@ -132,11 +114,11 @@ layer-rule {
 - True blur currently only works for horizontal monitor configurations. When using any sort of 90 or 270 degree
   transformations, only x-ray blur will be available.
 - True blur may exhibit some artifacts when rendered above a particularly active surface (e.g. a video player), due to
-  the way its performance optimizations are handled. This will be addressed in the future.
+  the way its performance optimizations are handled. This will be addressed in the future. If performance is not a
+  concern, this can be worked around by setting an extremely low draw interval, though be aware that this will heavily
+  utilize the GPU.
 - True blur will incur a significant performance cost when rendered behind a window that updates frequently, e.g.
   because it's being moved / resized often.
-- Although wayland protocols to enable blur are implemented, this fork currently lacks the ability for clients to more
-  granularly specify the desired blur region, meaning right now it's "all or nothing".
 
 ### Window Groups (Tabbed Tiles)
 
