@@ -23,7 +23,7 @@ where
     }
 
     pub fn with_offset(&self, point: Point<N, Kind>) -> Self {
-        Self {
+        let mut this = Self {
             rects: self
                 .rects
                 .iter()
@@ -34,7 +34,11 @@ where
                     r
                 })
                 .collect(),
-        }
+        };
+
+        this.sort_rects();
+
+        this
     }
 
     pub fn rects(&self) -> &[Rectangle<N, Kind>] {
@@ -44,6 +48,8 @@ where
     pub fn subtract_rect(&mut self, rect: Rectangle<N, Kind>) {
         self.rects =
             Rectangle::subtract_rects_many(self.rects.iter().copied(), std::iter::once(rect));
+
+        self.sort_rects();
     }
 
     pub fn add_rect(&mut self, rect: Rectangle<N, Kind>) {
@@ -52,17 +58,35 @@ where
             self.rects.push(rect);
         } else if self.rects.iter().any(|r| r.contains_rect(rect)) {
             // we are not adding any new rects
+            return;
         } else {
             // something intersects, so we only add the new portions to our list
             self.rects
                 .append(&mut rect.subtract_rects(self.rects.clone()));
         }
+
+        self.sort_rects();
     }
 
     pub fn from_rects(rects: impl IntoIterator<Item = Rectangle<N, Kind>>) -> Self {
-        Self {
+        let mut this = Self {
             rects: rects.into_iter().collect(),
-        }
+        };
+
+        this.sort_rects();
+
+        this
+    }
+
+    fn sort_rects(&mut self) {
+        self.rects.sort_by(|a, b| {
+            a.loc.x.partial_cmp(&b.loc.x).unwrap_or(
+                a.loc
+                    .y
+                    .partial_cmp(&b.loc.y)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+        });
     }
 }
 
