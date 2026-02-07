@@ -1,5 +1,4 @@
 use std::cmp::{max, min};
-use std::f64;
 use std::ffi::{CString, OsStr};
 use std::io::Write;
 use std::os::unix::prelude::OsStrExt;
@@ -7,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
+use std::{f64, io};
 
-use anyhow::{Context, ensure};
+use anyhow::{Context, bail, ensure};
 use bitflags::bitflags;
 use directories::UserDirs;
 use git_version::git_version;
@@ -224,9 +224,9 @@ pub fn expand_home(path: &Path) -> anyhow::Result<Option<PathBuf>> {
     }
 }
 
-pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> {
+pub fn make_screenshot_path(config: &Config) -> anyhow::Result<PathBuf> {
     let Some(path) = &config.screenshot_path.0 else {
-        return Ok(None);
+        bail!("screenshot directory is not set");
     };
 
     let format = CString::new(path.clone()).context("path must not contain nul bytes")?;
@@ -250,21 +250,63 @@ pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> 
         path = expanded;
     }
 
-    Ok(Some(path))
+    Ok(path)
 }
 
-pub fn write_png_rgba8(
-    w: impl Write,
-    width: u32,
-    height: u32,
-    pixels: &[u8],
-) -> Result<(), png::EncodingError> {
+type PendingWriter<W> = Box<dyn FnOnce() -> io::Result<W> + Send + 'static>;
+
+/// Writer, which initializes itself on first write
+pub enum LazyWriter<W> {
+    Pending(PendingWriter<W>),
+    Initialized(W),
+    Hole,
+}
+impl<W> LazyWriter<W> {
+    pub fn new<F: FnOnce() -> io::Result<W> + Send + 'static>(f: F) -> Self {
+        Self::Pending(Box::new(f))
+    }
+    fn ensure_init(&mut self) -> io::Result<&mut W> {
+        Ok(match self {
+            Self::Pending(_) => {
+                let Self::Pending(initializer) = std::mem::replace(self, Self::Hole) else {
+                    unreachable!("just matched");
+                };
+                *self = Self::Initialized(initializer()?);
+                let Self::Initialized(i) = self else {
+                    unreachable!("just initialized");
+                };
+                i
+            }
+            Self::Initialized(i) => i,
+            Self::Hole => {
+                unreachable!("enum can only stay in Hole state during first ensure_init call")
+            }
+        })
+    }
+}
+impl<W> Write for LazyWriter<W>
+where
+    W: Write,
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.ensure_init()?.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.ensure_init()?.flush()
+    }
+}
+
+pub fn write_png_rgba8(w: impl Write, width: u32, height: u32, pixels: &[u8]) -> io::Result<()> {
     let mut encoder = png::Encoder::new(w, width, height);
+
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
 
-    let mut writer = encoder.write_header()?;
-    writer.write_image_data(pixels)
+    let mut encoder = encoder.write_header()?;
+    encoder.write_image_data(pixels)?;
+    encoder.finish()?;
+    Ok(())
 }
 
 pub fn output_matches_name(output: &Output, target: &str) -> bool {
