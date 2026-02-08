@@ -10,6 +10,7 @@ use smithay::backend::renderer::gles::{
     ffi, link_program,
 };
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
+use smithay::gpu_span_location;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size};
 
 use super::renderer::AsGlesFrame;
@@ -376,138 +377,151 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
         let has_tint = frame.debug_flags().contains(DebugFlags::TINT);
 
         // render
-        frame.with_context(move |gl| -> Result<(), GlesError> {
-            let program = if has_debug {
-                &shader.0.debug
-            } else {
-                &shader.0.normal
-            };
-
-            unsafe {
-                for (i, texture) in self.textures.values().enumerate() {
-                    gl.ActiveTexture(ffi::TEXTURE0 + i as u32);
-                    gl.BindTexture(ffi::TEXTURE_2D, texture.tex_id());
-                    gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
-                    gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
-                    gl.TexParameteri(
-                        ffi::TEXTURE_2D,
-                        ffi::TEXTURE_WRAP_S,
-                        ffi::CLAMP_TO_BORDER as i32,
-                    );
-                    gl.TexParameteri(
-                        ffi::TEXTURE_2D,
-                        ffi::TEXTURE_WRAP_T,
-                        ffi::CLAMP_TO_BORDER as i32,
-                    );
-                }
-
-                gl.UseProgram(program.program);
-
-                for (i, name) in self.textures.keys().enumerate() {
-                    gl.Uniform1i(program.texture_uniforms[name], i as i32);
-                }
-
-                gl.UniformMatrix3fv(
-                    program.uniform_matrix,
-                    1,
-                    ffi::FALSE,
-                    matrix.as_ref().as_ptr(),
-                );
-                gl.UniformMatrix3fv(
-                    program.uniform_tex_matrix,
-                    1,
-                    ffi::FALSE,
-                    tex_matrix.as_ref().as_ptr(),
-                );
-                gl.Uniform2f(program.uniform_size, dest.size.w as f32, dest.size.h as f32);
-                gl.Uniform1f(program.uniform_scale, self.scale);
-                gl.Uniform1f(program.uniform_alpha, self.alpha);
-
-                let tint = if has_tint { 1.0f32 } else { 0.0f32 };
-                if has_debug {
-                    gl.Uniform1f(shader.0.uniform_tint, tint);
-                }
-
-                for uniform in &*self.additional_uniforms {
-                    let desc =
-                        program
-                            .additional_uniforms
-                            .get(&*uniform.name)
-                            .ok_or_else(|| {
-                                GlesError::UnknownUniform(uniform.name.clone().into_owned())
-                            })?;
-                    uniform.value.set(gl, desc)?;
-                }
-
-                gl.EnableVertexAttribArray(program.attrib_vert as u32);
-                gl.BindBuffer(ffi::ARRAY_BUFFER, resources.vbos[0]);
-                gl.VertexAttribPointer(
-                    program.attrib_vert as u32,
-                    2,
-                    ffi::FLOAT,
-                    ffi::FALSE,
-                    0,
-                    std::ptr::null(),
-                );
-
-                // vert_position
-                gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
-                gl.BindBuffer(ffi::ARRAY_BUFFER, resources.vbos[1]);
-                gl.BufferData(
-                    ffi::ARRAY_BUFFER,
-                    (std::mem::size_of::<ffi::types::GLfloat>() * resources.vertices.len())
-                        as isize,
-                    resources.vertices.as_ptr() as *const _,
-                    ffi::STREAM_DRAW,
-                );
-
-                gl.VertexAttribPointer(
-                    program.attrib_vert_position as u32,
-                    4,
-                    ffi::FLOAT,
-                    ffi::FALSE,
-                    0,
-                    std::ptr::null(),
-                );
-
-                let damage_len = damage.len() as i32;
-                if supports_instancing {
-                    gl.VertexAttribDivisor(program.attrib_vert as u32, 0);
-                    gl.VertexAttribDivisor(program.attrib_vert_position as u32, 1);
-                    gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len);
+        frame.with_profiled_context(
+            gpu_span_location!("ShaderRenderElement::draw"),
+            move |gl| -> Result<(), GlesError> {
+                let program = if has_debug {
+                    &shader.0.debug
                 } else {
-                    // When we have more than 10 rectangles, draw them in batches of 10.
-                    for i in 0..(damage_len - 1) / 10 {
-                        gl.DrawArrays(ffi::TRIANGLES, 0, 6);
+                    &shader.0.normal
+                };
 
-                        // Set damage pointer to the next 10 rectangles.
-                        let offset =
-                            (i + 1) as usize * 6 * 4 * std::mem::size_of::<ffi::types::GLfloat>();
-                        gl.VertexAttribPointer(
-                            program.attrib_vert_position as u32,
-                            4,
-                            ffi::FLOAT,
-                            ffi::FALSE,
-                            0,
-                            offset as *const _,
+                unsafe {
+                    for (i, texture) in self.textures.values().enumerate() {
+                        gl.ActiveTexture(ffi::TEXTURE0 + i as u32);
+                        gl.BindTexture(ffi::TEXTURE_2D, texture.tex_id());
+                        gl.TexParameteri(
+                            ffi::TEXTURE_2D,
+                            ffi::TEXTURE_MIN_FILTER,
+                            ffi::LINEAR as i32,
+                        );
+                        gl.TexParameteri(
+                            ffi::TEXTURE_2D,
+                            ffi::TEXTURE_MAG_FILTER,
+                            ffi::LINEAR as i32,
+                        );
+                        gl.TexParameteri(
+                            ffi::TEXTURE_2D,
+                            ffi::TEXTURE_WRAP_S,
+                            ffi::CLAMP_TO_BORDER as i32,
+                        );
+                        gl.TexParameteri(
+                            ffi::TEXTURE_2D,
+                            ffi::TEXTURE_WRAP_T,
+                            ffi::CLAMP_TO_BORDER as i32,
                         );
                     }
 
-                    // Draw the up to 10 remaining rectangles.
-                    let count = ((damage_len - 1) % 10 + 1) * 6;
-                    gl.DrawArrays(ffi::TRIANGLES, 0, count);
+                    gl.UseProgram(program.program);
+
+                    for (i, name) in self.textures.keys().enumerate() {
+                        gl.Uniform1i(program.texture_uniforms[name], i as i32);
+                    }
+
+                    gl.UniformMatrix3fv(
+                        program.uniform_matrix,
+                        1,
+                        ffi::FALSE,
+                        matrix.as_ref().as_ptr(),
+                    );
+                    gl.UniformMatrix3fv(
+                        program.uniform_tex_matrix,
+                        1,
+                        ffi::FALSE,
+                        tex_matrix.as_ref().as_ptr(),
+                    );
+                    gl.Uniform2f(program.uniform_size, dest.size.w as f32, dest.size.h as f32);
+                    gl.Uniform1f(program.uniform_scale, self.scale);
+                    gl.Uniform1f(program.uniform_alpha, self.alpha);
+
+                    let tint = if has_tint { 1.0f32 } else { 0.0f32 };
+                    if has_debug {
+                        gl.Uniform1f(shader.0.uniform_tint, tint);
+                    }
+
+                    for uniform in &*self.additional_uniforms {
+                        let desc =
+                            program
+                                .additional_uniforms
+                                .get(&*uniform.name)
+                                .ok_or_else(|| {
+                                    GlesError::UnknownUniform(uniform.name.clone().into_owned())
+                                })?;
+                        uniform.value.set(gl, desc)?;
+                    }
+
+                    gl.EnableVertexAttribArray(program.attrib_vert as u32);
+                    gl.BindBuffer(ffi::ARRAY_BUFFER, resources.vbos[0]);
+                    gl.VertexAttribPointer(
+                        program.attrib_vert as u32,
+                        2,
+                        ffi::FLOAT,
+                        ffi::FALSE,
+                        0,
+                        std::ptr::null(),
+                    );
+
+                    // vert_position
+                    gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
+                    gl.BindBuffer(ffi::ARRAY_BUFFER, resources.vbos[1]);
+                    gl.BufferData(
+                        ffi::ARRAY_BUFFER,
+                        (std::mem::size_of::<ffi::types::GLfloat>() * resources.vertices.len())
+                            as isize,
+                        resources.vertices.as_ptr() as *const _,
+                        ffi::STREAM_DRAW,
+                    );
+
+                    gl.VertexAttribPointer(
+                        program.attrib_vert_position as u32,
+                        4,
+                        ffi::FLOAT,
+                        ffi::FALSE,
+                        0,
+                        std::ptr::null(),
+                    );
+
+                    let damage_len = damage.len() as i32;
+                    if supports_instancing {
+                        gl.VertexAttribDivisor(program.attrib_vert as u32, 0);
+                        gl.VertexAttribDivisor(program.attrib_vert_position as u32, 1);
+                        gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len);
+                    } else {
+                        // When we have more than 10 rectangles, draw them in batches of 10.
+                        for i in 0..(damage_len - 1) / 10 {
+                            gl.DrawArrays(ffi::TRIANGLES, 0, 6);
+
+                            // Set damage pointer to the next 10 rectangles.
+                            let offset = (i + 1) as usize
+                                * 6
+                                * 4
+                                * std::mem::size_of::<ffi::types::GLfloat>();
+                            gl.VertexAttribPointer(
+                                program.attrib_vert_position as u32,
+                                4,
+                                ffi::FLOAT,
+                                ffi::FALSE,
+                                0,
+                                offset as *const _,
+                            );
+                        }
+
+                        // Draw the up to 10 remaining rectangles.
+                        let count = ((damage_len - 1) % 10 + 1) * 6;
+                        gl.DrawArrays(ffi::TRIANGLES, 0, count);
+                    }
+
+                    gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+                    gl.BindTexture(ffi::TEXTURE_2D, 0);
+                    gl.ActiveTexture(ffi::TEXTURE0);
+                    gl.BindTexture(ffi::TEXTURE_2D, 0);
+                    gl.DisableVertexAttribArray(program.attrib_vert as u32);
+                    gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
                 }
 
-                gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
-                gl.BindTexture(ffi::TEXTURE_2D, 0);
-                gl.ActiveTexture(ffi::TEXTURE0);
-                gl.BindTexture(ffi::TEXTURE_2D, 0);
-                gl.DisableVertexAttribArray(program.attrib_vert as u32);
-                gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
-            }
-
-            Ok(())
-        })??;
+                Ok(())
+            },
+        )??;
 
         Ok(())
     }

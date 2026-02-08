@@ -15,6 +15,7 @@ use smithay::backend::renderer::gles::{
     GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform, ffi,
 };
 use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
+use smithay::gpu_span_location;
 use smithay::reexports::gbm::Format;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
@@ -546,12 +547,15 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
             .expect("should be compiled");
 
         if let Some(alpha_tex) = &self.alpha_tex {
-            gles_frame.with_context(|gl| unsafe {
-                gl.ActiveTexture(ffi::TEXTURE1);
-                gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
-                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
-                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
-            })?;
+            gles_frame.with_profiled_context(
+                gpu_span_location!("BlurRenderElement::draw"),
+                |gl| unsafe {
+                    gl.ActiveTexture(ffi::TEXTURE1);
+                    gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
+                    gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+                    gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+                },
+            )?;
         }
 
         match &self.variant {
@@ -591,22 +595,25 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                     .map(|r| r < Instant::now())
                     .unwrap_or(true)
                 {
-                    gles_frame.with_context(|gl| unsafe {
-                        super::get_main_buffer_blur(
-                            gl,
-                            &mut fx_buffers,
-                            &shaders,
-                            *config,
-                            projection_matrix,
-                            self.scale as i32,
-                            &vbos,
-                            debug,
-                            supports_instancing,
-                            scaled_dst,
-                            texture,
-                            self.alpha_tex.as_ref(),
-                        )
-                    })??;
+                    gles_frame.with_profiled_context(
+                        gpu_span_location!("BlurRenderElement::draw"),
+                        |gl| unsafe {
+                            super::get_main_buffer_blur(
+                                gl,
+                                &mut fx_buffers,
+                                &shaders,
+                                *config,
+                                projection_matrix,
+                                self.scale as i32,
+                                &vbos,
+                                debug,
+                                supports_instancing,
+                                scaled_dst,
+                                texture,
+                                self.alpha_tex.as_ref(),
+                            )
+                        },
+                    )??;
 
                     rerender_at.set(Some(
                         Instant::now()
