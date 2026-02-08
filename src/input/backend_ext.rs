@@ -4,16 +4,24 @@ use smithay::backend::winit::WinitVirtualDevice;
 use smithay::output::Output;
 
 use crate::niri::State;
+use crate::protocols::virtual_keyboard::VirtualKeyboard;
 use crate::protocols::virtual_pointer::VirtualPointer;
 
 pub trait NiriInputBackend: input::InputBackend<Device = Self::NiriDevice> {
     type NiriDevice: NiriInputDevice;
 }
+
 impl<T: input::InputBackend> NiriInputBackend for T
 where
     Self::Device: NiriInputDevice,
 {
     type NiriDevice = Self::Device;
+}
+
+impl NiriInputDevice for VirtualKeyboard {
+    fn output(&self, _: &State) -> Option<Output> {
+        None
+    }
 }
 
 pub trait NiriInputDevice: input::Device {
