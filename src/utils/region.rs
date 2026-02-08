@@ -5,13 +5,41 @@ use smithay::{
     wayland::compositor::{RectangleKind, RegionAttributes},
 };
 
+// NOTE: The `Clone` impls need to be manual, because the derive macro puts a trait bound of
+// `smithay::utils::Logical: Clone` otherwise, which is not desirable.
+
 /// A region described using a list of additive [`Rectangle`]s.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Region<N, Kind>
 where
     N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign,
 {
     rects: RegionInner<N, Kind>,
+}
+
+impl<N, Kind> PartialEq for Region<N, Kind>
+where
+    N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.rects == other.rects
+    }
+}
+
+impl<N, Kind> Eq for Region<N, Kind> where
+    N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign + Eq
+{
+}
+
+impl<N, Kind> Clone for Region<N, Kind>
+where
+    N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign,
+{
+    fn clone(&self) -> Self {
+        Self {
+            rects: self.rects.clone(),
+        }
+    }
 }
 
 impl<N, Kind> Region<N, Kind>
@@ -22,6 +50,17 @@ where
         Self {
             rects: RegionInner::Empty,
         }
+    }
+
+    #[must_use]
+    pub fn encompassing_area(&self) -> Rectangle<N, Kind> {
+        let mut rects = self.rects();
+
+        let Some(first) = rects.next() else {
+            return Rectangle::default();
+        };
+
+        rects.fold(first, |acc, curr| acc.merge(curr))
     }
 
     pub fn rects(&self) -> impl Iterator<Item = Rectangle<N, Kind>> {
@@ -134,7 +173,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum RegionInner<N, Kind>
 where
     N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign,
@@ -142,6 +181,37 @@ where
     Empty,
     Single(Rectangle<N, Kind>),
     Multiple(Vec<Rectangle<N, Kind>>),
+}
+
+impl<N, Kind> PartialEq for RegionInner<N, Kind>
+where
+    N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign,
+{
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Single(l0), Self::Single(r0)) => l0 == r0,
+            (Self::Multiple(l0), Self::Multiple(r0)) => l0 == r0,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl<N, Kind> Eq for RegionInner<N, Kind> where
+    N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign + Eq
+{
+}
+
+impl<N, Kind> Clone for RegionInner<N, Kind>
+where
+    N: Coordinate + Default + PartialOrd + Add + Sub + Copy + AddAssign,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Empty => Self::Empty,
+            Self::Single(arg0) => Self::Single(*arg0),
+            Self::Multiple(arg0) => Self::Multiple(arg0.clone()),
+        }
+    }
 }
 
 impl<N, Kind> RegionInner<N, Kind>

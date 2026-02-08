@@ -252,6 +252,10 @@ impl MappedLayer {
     }
 
     pub fn set_blur_region(&mut self, region: Option<Region<i32, Logical>>) {
+        if region != self.blur_region {
+            self.blur.clear_alpha_tex();
+        }
+
         self.blur_region = region;
     }
 
