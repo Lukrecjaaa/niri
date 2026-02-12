@@ -1781,6 +1781,8 @@ impl<W: LayoutElement> Workspace<W> {
         target: RenderTarget,
         focus_ring: bool,
         overview_zoom: f64,
+        workspace_geo: Rectangle<f64, Logical>,
+        apply_blur_sample_transform: bool,
         collector: &mut C,
     ) where
         R: NiriRenderer,
@@ -1789,6 +1791,11 @@ impl<W: LayoutElement> Workspace<W> {
         let fx_buffers = self
             .current_output()
             .and_then(EffectsFramebuffers::get_user_data);
+        let (blur_sample_offset, blur_sample_scale) = if apply_blur_sample_transform {
+            (workspace_geo.loc, overview_zoom)
+        } else {
+            (Point::from((0., 0.)), 1.)
+        };
 
         self.scrolling.render(
             renderer,
@@ -1797,6 +1804,8 @@ impl<W: LayoutElement> Workspace<W> {
                 focus_ring: focus_ring && !self.floating_is_active(),
                 fx_buffers,
                 overview_zoom,
+                blur_sample_offset,
+                blur_sample_scale,
             },
             &mut collector.as_child(),
         );
@@ -1808,6 +1817,8 @@ impl<W: LayoutElement> Workspace<W> {
         target: RenderTarget,
         focus_ring: bool,
         overview_zoom: f64,
+        workspace_geo: Rectangle<f64, Logical>,
+        apply_blur_sample_transform: bool,
         collector: &mut C,
     ) where
         R: NiriRenderer,
@@ -1816,6 +1827,11 @@ impl<W: LayoutElement> Workspace<W> {
         let fx_buffers = self
             .current_output()
             .and_then(EffectsFramebuffers::get_user_data);
+        let (blur_sample_offset, blur_sample_scale) = if apply_blur_sample_transform {
+            (workspace_geo.loc, overview_zoom)
+        } else {
+            (Point::from((0., 0.)), 1.)
+        };
 
         if !self.is_floating_visible() {
             return;
@@ -1829,6 +1845,8 @@ impl<W: LayoutElement> Workspace<W> {
                 focus_ring: focus_ring && self.floating_is_active(),
                 fx_buffers,
                 overview_zoom,
+                blur_sample_offset,
+                blur_sample_scale,
             },
             &mut collector.as_child(),
         );
