@@ -1734,6 +1734,8 @@ impl<W: LayoutElement> Monitor<W> {
         };
 
         for (ws, geo) in self.workspaces_with_render_geo() {
+            let blur_sample_transform = apply_blur_sample_transform.then_some((geo.loc, zoom));
+
             // Macro instead of closure because ws and insert hint have different elem types.
             macro_rules! push {
                 () => {
@@ -1753,8 +1755,7 @@ impl<W: LayoutElement> Monitor<W> {
                 target,
                 focus_ring,
                 zoom,
-                geo,
-                apply_blur_sample_transform,
+                blur_sample_transform,
                 push!(),
             );
 
@@ -1770,8 +1771,7 @@ impl<W: LayoutElement> Monitor<W> {
                 target,
                 focus_ring,
                 zoom,
-                geo,
-                apply_blur_sample_transform,
+                blur_sample_transform,
                 push!(),
             );
         }

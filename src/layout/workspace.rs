@@ -1781,8 +1781,7 @@ impl<W: LayoutElement> Workspace<W> {
         target: RenderTarget,
         focus_ring: bool,
         overview_zoom: f64,
-        workspace_geo: Rectangle<f64, Logical>,
-        apply_blur_sample_transform: bool,
+        blur_sample_transform: Option<(Point<f64, Logical>, f64)>,
         collector: &mut C,
     ) where
         R: NiriRenderer,
@@ -1791,11 +1790,8 @@ impl<W: LayoutElement> Workspace<W> {
         let fx_buffers = self
             .current_output()
             .and_then(EffectsFramebuffers::get_user_data);
-        let (blur_sample_offset, blur_sample_scale) = if apply_blur_sample_transform {
-            (workspace_geo.loc, overview_zoom)
-        } else {
-            (Point::from((0., 0.)), 1.)
-        };
+        let (blur_sample_offset, blur_sample_scale) =
+            blur_sample_transform.unwrap_or((Point::from((0., 0.)), 1.));
 
         self.scrolling.render(
             renderer,
@@ -1817,8 +1813,7 @@ impl<W: LayoutElement> Workspace<W> {
         target: RenderTarget,
         focus_ring: bool,
         overview_zoom: f64,
-        workspace_geo: Rectangle<f64, Logical>,
-        apply_blur_sample_transform: bool,
+        blur_sample_transform: Option<(Point<f64, Logical>, f64)>,
         collector: &mut C,
     ) where
         R: NiriRenderer,
@@ -1827,11 +1822,8 @@ impl<W: LayoutElement> Workspace<W> {
         let fx_buffers = self
             .current_output()
             .and_then(EffectsFramebuffers::get_user_data);
-        let (blur_sample_offset, blur_sample_scale) = if apply_blur_sample_transform {
-            (workspace_geo.loc, overview_zoom)
-        } else {
-            (Point::from((0., 0.)), 1.)
-        };
+        let (blur_sample_offset, blur_sample_scale) =
+            blur_sample_transform.unwrap_or((Point::from((0., 0.)), 1.));
 
         if !self.is_floating_visible() {
             return;
